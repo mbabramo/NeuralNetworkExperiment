@@ -2,6 +2,7 @@
 using System.Diagnostics;
 using System.Linq;
 using System.Threading.Tasks;
+using NeuralNetworkNet;
 using NeuralNetworkNET.APIs;
 using NeuralNetworkNET.APIs.Enums;
 using NeuralNetworkNET.APIs.Interfaces;
@@ -22,7 +23,7 @@ namespace NeuralNetworkExperiment
             int numSamplesForTraining = 36_000;
             int numSamplesForValidation = 2_000;
             int batchSize = 200;
-            int epochs = 1_000;
+            int epochs = 100;
             Random r = new Random();
             var data = new (float[] X, float[] Y)[numSamples];
             for (int q = 0; q < data.Length; q++)
@@ -34,16 +35,27 @@ namespace NeuralNetworkExperiment
                 data[q].X = new float[] { a_norm, b_norm };
                 data[q].Y = new float[] { (float)((a - 0.3)*(a-0.3) + (b-0.7)*(b-0.7)) };
             }
-            await TestNeuralNetwork(numSamples, numSamplesForTraining, numSamplesForValidation, batchSize, data, CostFunctionType.Quadratic, 0, TrainingAlgorithms.RMSProp(), epochs);
+            INeuralNetwork network = await TestNeuralNetwork(numSamples, numSamplesForTraining, numSamplesForValidation, batchSize, data, CostFunctionType.Quadratic, 0, TrainingAlgorithms.RMSProp(), epochs);
+            FreezeInputsParams.FreezeNetwork = true;
+            FreezeInputsParams.ChangeInput = true;
+            numSamplesForTraining = 1; // DEBUG
+            batchSize = 10;
+            data[0].Y = new float[] { 0 };
+            var DEBUG1 = network.Forward(new float[] { 0.01f, 0.02f });
+            var DEBUG2 = network.Forward(new float[] { 0.29f, 0.71f });
+            var DEBUG3 = network.Forward(new float[] { 0.2f, 0.8f });
+            var DEBUG4 = network.Forward(new float[] { 0.3f, 0.7f });
+            await TestNeuralNetwork(numSamples, numSamplesForTraining, numSamplesForValidation, batchSize, data, CostFunctionType.Quadratic, 0, TrainingAlgorithms.RMSProp(), 1_000_000 /* DEBUG epochs */, network);
         }
 
-        private static async Task TestNeuralNetwork(int numSamples, int numSamplesForTraining, int numSamplesForValidation, int batchSize, (float[] X, float[] Y)[] data, CostFunctionType costFunctionType, float dropout, ITrainingAlgorithmInfo trainingAlgorithm, int epochs)
+        private static async Task<INeuralNetwork> TestNeuralNetwork(int numSamples, int numSamplesForTraining, int numSamplesForValidation, int batchSize, (float[] X, float[] Y)[] data, CostFunctionType costFunctionType, float dropout, ITrainingAlgorithmInfo trainingAlgorithm, int epochs, INeuralNetwork network = null)
         {
             Stopwatch s = new Stopwatch();
             s.Start();
-            INeuralNetwork network = NetworkManager.NewSequential(TensorInfo.Linear(data.First().X.Length),
-                NetworkLayers.FullyConnected(50, ActivationType.ReLU),
-                NetworkLayers.FullyConnected(1, ActivationType.Tanh, costFunctionType));
+            if (network == null)
+                network = NetworkManager.NewSequential(TensorInfo.Linear(data.First().X.Length),
+                    NetworkLayers.FullyConnected(500, ActivationType.ReLU),
+                    NetworkLayers.FullyConnected(1, ActivationType.Tanh, costFunctionType));
             ITrainingDataset trainingData = DatasetLoader.Training(data.Take(numSamplesForTraining), batchSize);
             var validationData = DatasetLoader.Validation(data.Skip(numSamplesForTraining).Take(numSamplesForValidation), 0.005f, 10);
             ITestDataset testData = DatasetLoader.Test(data.Skip(numSamplesForTraining + numSamplesForValidation));
@@ -66,6 +78,7 @@ namespace NeuralNetworkExperiment
             var maxProjected = testDataResults.Select(d => d.Item1).Max();
             var avgAbsolute = testDataResults.Average(d => Math.Abs(d.Item2 - d.Item1));
             Console.WriteLine($"Cost function {costFunctionType} dropout {dropout} trainingAlgorithm {trainingAlgorithm} correlation {correlation} avgabsdiff {avgAbsolute} min-projected {minProjected} max-projected {maxProjected} time {s.ElapsedMilliseconds / 1000.0 }");
+            return network;
         }
         static float CorrelationCoefficient(float[] values1, float[] values2)
         {
